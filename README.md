@@ -12,8 +12,8 @@ Codex flags and the handoff path.  It deliberately does not use `codex resume`.
 ## Why bound token usage?
 
 `fork_turns: all` can multiply input usage by copying parent context into many
-subagents. Compaction billing is opaque. This tool caps observable lineage
-tokens and restarts from a small handoff instead of native resume.
+subagents. This preserves overnight progress with bounded handoffs instead of
+allowing an unbounded session. Compaction billing is opaque.
 
 ## Status
 
@@ -45,8 +45,9 @@ type it into the TUI.  Later versions can preserve one safely.
 For production, begin with a small cap and then use e.g.:
 
 ```bash
-./bound-codex-tokens --session 10M --compactions 2 \\
-  --v2-spawn-policy --max-sol-subagents 0 -- --yolo -m gpt-5.6-terra
+./bound-codex-tokens --session 10000000 --compactions 2 \\
+  --v2-spawn-policy --max-sol-subagents 0 -- \\
+  --enable multi_agent_v2 --yolo -m gpt-5.6-terra
 ```
 
 `--compactions 2` means at most two automatic fresh-TUI resumes. On the next
@@ -62,8 +63,8 @@ bound-codex-tokens --session 10M --compactions 2 \\
 
 ## Enforcement model
 
-* `--session` accepts `500`, `10K`, `10M`, or `1B` and measures reported total
-  input plus output tokens, including reported cached input.
+* `--session` accepts any positive token count, optionally using `K`, `M`, or
+  `B` suffixes, and measures reported input plus output tokens.
 * `--deny-sol-subagents` fail-fast stops when a `spawn_agent` call requests a
   Sol model or a recorded child identifies itself as Sol.
 * `--require-fork-none` fail-fast stops when a v2 `spawn_agent` omits
@@ -74,28 +75,12 @@ TUI keeps model tool calls inside Codex, so an external watcher can only stop
 the root once the spawn event is written.  Native rollout budget is a useful
 second guard, but it does not represent a total billed-token cap.
 
-## Pre-spawn v2 hook
+## V2 policy
 
-For prevention rather than detection, install the opt-in `PreToolUse` hook in
-`hooks/bound-v2-spawn-policy.toml`. After `uv tool install .`, use this command
-to locate the installed hook script for its `command` field:
-
-```bash
-uv tool run --from bound-codex-tokens python -c \
-  'import bound_codex_tokens_hooks.v2_spawn_policy as p; print(p.__file__)'
-```
-
-It sees `spawn_agent` and its complete
-arguments before execution. It blocks Sol models and every value other than
-`fork_turns: none`, then returns the reason as both a tool-block reason and
-additional context to the main agent. Attach this hook only to the v2 profile
-or session; it does not need to run for ordinary Codex sessions.
-
-The protector's `--v2-spawn-policy` option does this automatically as a
-per-launch `-c` override and enables `multi_agent_v2`. It does not modify
-`~/.codex/config.toml`. It replaces `PreToolUse` hooks for that protected
-process, so do not combine it with another required PreToolUse policy until
-hook-list merging is supported.
+`--v2-spawn-policy` automatically installs a per-launch `PreToolUse` hook and
+enables `multi_agent_v2`; it does not modify `~/.codex/config.toml`. The hook
+requires `fork_turns: none`, enforces the Sol allowance, and blocks nested
+`codex exec` commands that would bypass lineage accounting.
 
 Allow two explicitly requested Sol subagents while continuing to require
 `fork_turns: none`:
@@ -107,11 +92,6 @@ bound-codex-tokens --session 10M --compactions 2 \\
 
 The hook maintains this allowance per root session locally. It tells the main
 agent when it spends an allowance and blocks later Sol spawn attempts.
-
-### Enable multi-agent v2
-
-Pass `--enable multi_agent_v2` to Codex for a single session. The
-`--v2-spawn-policy` switch already adds it.
 
 The implementation uses the normal TUI instead of the SDK/App Server so that
 the terminal remains the normal Codex terminal. A custom App Server client can

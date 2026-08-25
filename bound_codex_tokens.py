@@ -24,7 +24,10 @@ def token_limit(value: str) -> int:
     if not match:
         raise argparse.ArgumentTypeError("use an integer or 10K, 10M, 1B")
     multiplier = {"": 1, "k": 1_000, "m": 1_000_000, "b": 1_000_000_000}[match.group(2).lower()]
-    return int(float(match.group(1).replace("_", "")) * multiplier)
+    result = int(float(match.group(1).replace("_", "")) * multiplier)
+    if result <= 0:
+        raise argparse.ArgumentTypeError("must be a positive token count")
+    return result
 
 
 def default_sessions_dir() -> Path:
@@ -226,9 +229,9 @@ def v2_policy_config_args(max_sol_subagents: int, state_file: Path) -> list[str]
     ])
     # TOML inline tables use `=` rather than JSON's `:`. Build it explicitly so
     # the hook command remains safely quoted even when its path contains spaces.
-    value = ('[{ matcher = "^spawn_agent$", hooks = '
+    value = ('[{ matcher = ".*", hooks = '
              '[{ type = "command", command = ' + json.dumps(command) +
-             ', timeout = 5, statusMessage = "checking v2 subagent policy" }] }]')
+             ', timeout = 5, statusMessage = "checking protected Codex policy" }] }]')
     return ["--enable", "multi_agent_v2", "-c", f"hooks.PreToolUse={value}"]
 
 

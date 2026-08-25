@@ -7,13 +7,14 @@ import argparse
 import fcntl
 import json
 from pathlib import Path
+import re
 import sys
 from typing import Any
 
 
 def deny(reason: str, max_sol: int) -> dict[str, Any]:
     message = (
-        f"bound-codex-tokens blocked this subagent: {reason}. "
+        f"bound-codex-tokens blocked this operation: {reason}. "
         "For multi_agent_v2, use fork_turns: none and a permitted subagent model "
         f"(Sol allowance: {max_sol})."
     )
@@ -49,6 +50,16 @@ def sol_slot(state_file: Path, session_id: str, maximum: int) -> tuple[bool, int
         return True, count + 1
 
 
+def nested_codex_exec(tool_input: Any) -> bool:
+    """Detect a Codex CLI exec command in a tool payload without shell parsing."""
+    if isinstance(tool_input, dict):
+        return any(nested_codex_exec(value) for key, value in tool_input.items()
+                   if key in {"cmd", "command", "shell_command"})
+    if not isinstance(tool_input, str):
+        return False
+    return bool(re.search(r"\bcodex\s+(?:exec|e)\b", tool_input, re.IGNORECASE))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--max-sol-subagents", type=int, default=0)
@@ -60,10 +71,16 @@ def main() -> int:
         event = json.load(sys.stdin)
     except json.JSONDecodeError:
         return 0
-    if event.get("hook_event_name") != "PreToolUse" or event.get("tool_name") != "spawn_agent":
+    if event.get("hook_event_name") != "PreToolUse":
         print("{}")
         return 0
     tool_input = event.get("tool_input") or {}
+    if nested_codex_exec(tool_input):
+        print(json.dumps(deny("nested `codex exec` sessions are disabled because they bypass lineage accounting", args.max_sol_subagents)))
+        return 0
+    if event.get("tool_name") != "spawn_agent":
+        print("{}")
+        return 0
     model = str(tool_input.get("model") or "").lower()
     if "sol" in model:
         allowed, used = sol_slot(args.state_file, str(event.get("session_id")), args.max_sol_subagents)
