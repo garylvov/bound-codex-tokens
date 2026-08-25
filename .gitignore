@@ -1,0 +1,6 @@
+__pycache__/
+.venv/
+.bound-codex-tokens/
+build/
+dist/
+*.egg-info/

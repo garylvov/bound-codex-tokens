@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bound-codex-tokens"
+version = "0.1.0"
+description = "Local token and v2 delegation guard for interactive Codex sessions"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+bound-codex-tokens = "bound_codex_tokens:main"
+
+[tool.setuptools]
+py-modules = ["bound_codex_tokens"]
+packages = ["bound_codex_tokens_hooks"]
+
+[tool.setuptools.package-data]
+bound_codex_tokens_hooks = ["*.toml"]
