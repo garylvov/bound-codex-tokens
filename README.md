@@ -1,19 +1,10 @@
 # bound-codex-tokens
 
-Local, terminal-first protection for long-running Codex workflows.
-
-It launches the normal Codex TUI, watches only sessions created after launch,
-and totals `token_count.last_token_usage` across the root session and its v2
-subagent lineage. On a limit it stops the TUI, asks a configurable summary
-model for a **bounded**
-handoff based on selected JSONL records, then starts a fresh TUI with the same
-Codex flags and the handoff path.  It deliberately does not use `codex resume`.
-
-## Why bound token usage?
-
-`fork_turns: all` can multiply input usage by copying parent context into many
-subagents. This preserves overnight progress with bounded handoffs instead of
-allowing an unbounded session. Compaction billing is opaque.
+Local, terminal-first protection for long-running Codex workflows. It keeps the
+normal TUI open for overnight work, bounds total session usage, and rolls over
+through a small model-generated handoff rather than letting one workflow run
+unbounded. It also guards multi-agent delegation, where inherited context can
+make token usage grow quickly.
 
 ## Status
 
