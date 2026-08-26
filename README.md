@@ -67,16 +67,16 @@ no Sol children:
 bound-codex-tokens --total 10M --compactions 2 \
   --v2-spawn-policy --max-sol-subagents 0 \
   --allowed-subagent-models gpt-5.6-terra gpt-5.6-luna \
-  -- --disable auto_review --yolo -m gpt-5.6-terra
+  -- --enable multi_agent_v2 --disable auto_review --yolo -m gpt-5.6-terra
 ```
 
-`--v2-spawn-policy` automatically supplies the full Codex flag
-`--enable multi_agent_v2`; do not add it again. `fork_turns: none` means a
-child starts without a copy of the parent conversation history. It prevents a
-large main context from being charged again to every delegated child. Use
-`--max-sol-subagents 2` to allow exactly two Sol children. Without a v2 policy,
-Sol is still denied by default; use `--allow-sol-subagents` only when that is
-intentional.
+`--v2-spawn-policy` enables `multi_agent_v2` when it is absent and is
+idempotent when the normal Codex flag `--enable multi_agent_v2` is already
+present. `fork_turns: none` means a child starts without a copy of the parent
+conversation history. It prevents a large main context from being charged again
+to every delegated child. Use `--max-sol-subagents 2` to allow exactly two Sol
+children. Without a v2 policy, Sol is still denied by default; use
+`--allow-sol-subagents` only when that is intentional.
 
 `--disable auto_review` is passed to Codex and makes that choice explicit for
 these long-running sessions. It is separate from `--yolo`, which controls

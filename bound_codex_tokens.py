@@ -229,7 +229,18 @@ def without_initial_prompt(arguments: list[str]) -> list[str]:
     return result
 
 
-def v2_policy_config_args(max_sol_subagents: int, allowed_models: list[str], state_file: Path) -> list[str]:
+def v2_already_enabled(arguments: list[str]) -> bool:
+    """Recognize the normal CLI spelling so the v2 flag is never duplicated."""
+    return any(
+        item == "--enable=multi_agent_v2"
+        or item == "features.multi_agent_v2=true"
+        or (item == "--enable" and index + 1 < len(arguments) and arguments[index + 1] == "multi_agent_v2")
+        for index, item in enumerate(arguments)
+    )
+
+
+def v2_policy_config_args(max_sol_subagents: int, allowed_models: list[str], state_file: Path,
+                          already_enabled: bool) -> list[str]:
     """Return a process-local PreToolUse hook config, without touching config.toml."""
     from bound_codex_tokens_hooks import v2_spawn_policy
 
@@ -245,14 +256,18 @@ def v2_policy_config_args(max_sol_subagents: int, allowed_models: list[str], sta
     value = ('[{ matcher = ".*", hooks = '
              '[{ type = "command", command = ' + json.dumps(command) +
              ', timeout = 5, statusMessage = "checking protected Codex policy" }] }]')
-    return ["--enable", "multi_agent_v2", "-c", f"hooks.PreToolUse={value}"]
+    enable_args = [] if already_enabled else ["--enable", "multi_agent_v2"]
+    return [*enable_args, "-c", f"hooks.PreToolUse={value}"]
 
 
 def self_test() -> int:
     assert token_limit("500") == 500
     assert token_limit("10M") == 10_000_000
     assert without_initial_prompt(["--yolo", "-m", "gpt-5.6-luna", "hello"]) == ["--yolo", "-m", "gpt-5.6-luna"]
-    print("self-test passed: limits and Codex flag preservation")
+    assert v2_already_enabled(["--enable", "multi_agent_v2"])
+    assert v2_already_enabled(["--enable=multi_agent_v2"])
+    assert not v2_already_enabled(["--enable", "multi_agent"])
+    print("self-test passed: limits, flag preservation, and idempotent v2 activation")
     return 0
 
 
@@ -307,7 +322,12 @@ def main() -> int:
     cwd = Path.cwd()
     state_file = args.output_dir / f"v2-spawn-policy-{os.getpid()}.json"
     allowed_models = model_list(args.allowed_subagent_models) + args.allowed_subagent_model_legacy
-    policy_args = v2_policy_config_args(args.max_sol_subagents, allowed_models, state_file) if args.v2_spawn_policy else []
+    policy_args = (
+        v2_policy_config_args(
+            args.max_sol_subagents, allowed_models, state_file, v2_already_enabled(codex_args)
+        )
+        if args.v2_spawn_policy else []
+    )
     while True:
         baseline = discover_logs(args.sessions_dir)
         launch_args = (codex_args if first_launch else without_initial_prompt(codex_args) + [
