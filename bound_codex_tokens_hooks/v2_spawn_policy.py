@@ -63,6 +63,7 @@ def nested_codex_exec(tool_input: Any) -> bool:
 def main() -> int:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--max-sol-subagents", type=int, default=0)
+    parser.add_argument("--allowed-model", action="append", default=[])
     parser.add_argument("--state-file", type=Path, required=True)
     args = parser.parse_args()
     if args.max_sol_subagents < 0:
@@ -81,7 +82,14 @@ def main() -> int:
     if event.get("tool_name") != "spawn_agent":
         print("{}")
         return 0
+    if tool_input.get("fork_turns") != "none":
+        print(json.dumps(deny("fork_turns must be explicitly set to none", args.max_sol_subagents)))
+        return 0
     model = str(tool_input.get("model") or "").lower()
+    allowed_models = {item.lower() for item in args.allowed_model}
+    if allowed_models and model not in allowed_models:
+        print(json.dumps(deny("subagent model is not in the allowed-model list", args.max_sol_subagents)))
+        return 0
     if "sol" in model:
         allowed, used = sol_slot(args.state_file, str(event.get("session_id")), args.max_sol_subagents)
         if not allowed:
@@ -89,9 +97,6 @@ def main() -> int:
             return 0
         message = f"bound-codex-tokens: Sol subagent {used}/{args.max_sol_subagents} allowed."
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": message}}))
-        return 0
-    if tool_input.get("fork_turns") != "none":
-        print(json.dumps(deny("fork_turns must be explicitly set to none", args.max_sol_subagents)))
         return 0
     print("{}")
     return 0

@@ -1,89 +1,90 @@
 # bound-codex-tokens
 
-Local, terminal-first protection for long-running Codex workflows. It keeps the
-normal TUI open for overnight work, bounds total session usage, and rolls over
-through a small model-generated handoff rather than letting one workflow run
-unbounded. It also guards multi-agent delegation, where inherited context can
-make token usage grow quickly.
+Local, terminal-first protection for long-running Codex workflows. It lets
+Codex keep working overnight, while placing a finite boundary around one
+workflow and its delegated work.
 
-## Status
+## The three controls
 
-This is a prototype for Codex CLI 0.147.0.  Run the no-cost checks first:
+1. **Bounded rollovers.** `--session` is a reported-token cap and
+   `--compactions` is the finite number of automatic fresh-TUI resumes. At
+   each cap, the wrapper writes a small handoff, starts a fresh normal Codex
+   TUI, and preserves the flags passed after `--`. After the allowed rollovers,
+   it writes one final handoff and stops.
+2. **Configurable handoffs.** The handoff uses Luna by default, but its model,
+   reasoning effort, and prompt are independent of the interactive TUI. The
+   prompt is a top-level option so the continuation format is predictable.
+3. **Guarded v2 delegation.** `--v2-spawn-policy` turns on
+   `--enable multi_agent_v2` and adds a temporary per-launch hook. It requires
+   `fork_turns: none`, blocks Sol by default, can allow a finite number of Sol
+   children, and can restrict children to an explicit model list.
+
+This is intentionally a safety wrapper, not a substitute for Codex: the TUI
+stays attached, so a long-running workflow can still make progress while the
+wrapper bounds its lifecycle.
+
+## Install
 
 ```bash
-python3 bound_codex_tokens.py --self-test
-```
-
-Install it with `uv`:
-
-```bash
-uv tool install .
+uv tool install bound-codex-tokens
 bound-codex-tokens --help
 ```
 
-Then run a deliberately small live summary test from a real terminal (not a CI
-shell), where it can keep the TUI attached:
+From a checkout, use `uv tool install .`.
+
+## Examples
+
+Run the normal TUI with any positive token cap (`K`, `M`, and `B` are accepted)
+and two automatic rollovers:
 
 ```bash
-./bound-codex-tokens --session 500 --compactions 1 -- --yolo -m gpt-5.6-luna
+bound-codex-tokens --session 10M --compactions 2 -- --yolo -m gpt-5.6-terra
 ```
 
-`--` separates protector options from flags passed directly to `codex`; thus
-`--yolo`, model, sandbox, config, and other normal Codex flags survive each
-fresh TUI launch.  Do not pass an initial Codex prompt during the live test;
-type it into the TUI.  Later versions can preserve one safely.
+`--yolo` is passed straight through to Codex and gives it broad authority to
+act without asking. Use it only in a workspace and environment you are willing
+to let the unattended TUI change.
 
-For production, begin with a small cap and then use e.g.:
+Customize the bounded handoff (also called a compaction here) independently:
 
 ```bash
-./bound-codex-tokens --session 10000000 --compactions 2 \\
-  --v2-spawn-policy --max-sol-subagents 0 -- \\
-  --enable multi_agent_v2 --yolo -m gpt-5.6-terra
+bound-codex-tokens --session 10M --compactions 2 \
+  --compaction-model gpt-5.6-terra --compaction-effort high \
+  --compaction-prompt 'List completed work, tests, blockers, and the next exact action.' \
+  -- --yolo
 ```
 
-`--compactions 2` means at most two automatic fresh-TUI resumes. On the next
-cap it still produces one final handoff, prints its path, and stops.
+The wrapper does not use a copied native Codex compaction prompt. Compaction
+output is intentionally opaque in the upstream API, so this tool uses an
+explicit prompt and only supplies selected user/assistant messages plus a
+small manifest to the handoff model.
 
-The handoff defaults to Luna at medium effort. Customize it independently of
-the TUI model:
+Enable guarded multi-agent v2, permit only Terra or Luna children, and permit
+no Sol children:
 
 ```bash
-bound-codex-tokens --session 10M --compactions 2 \\
-  --summary-model gpt-5.6-terra --summary-effort high -- --yolo
+bound-codex-tokens --session 10M --compactions 2 \
+  --v2-spawn-policy --max-sol-subagents 0 \
+  --allowed-subagent-model gpt-5.6-terra \
+  --allowed-subagent-model gpt-5.6-luna \
+  -- --yolo -m gpt-5.6-terra
 ```
 
-## Enforcement model
+`--v2-spawn-policy` automatically supplies the full Codex flag
+`--enable multi_agent_v2`; do not add it again. `fork_turns: none` means a
+child starts without a copy of the parent conversation history. It prevents a
+large main context from being charged again to every delegated child. Use
+`--max-sol-subagents 2` to allow exactly two Sol children. Without a v2 policy,
+Sol is still denied by default; use `--allow-sol-subagents` only when that is
+intentional.
 
-* `--session` accepts any positive token count, optionally using `K`, `M`, or
-  `B` suffixes, and measures reported input plus output tokens.
-* `--deny-sol-subagents` fail-fast stops when a `spawn_agent` call requests a
-  Sol model or a recorded child identifies itself as Sol.
-* `--require-fork-none` fail-fast stops when a v2 `spawn_agent` omits
-  `fork_turns: none` or asks for another value.
+The v2 hook also blocks nested `codex exec` calls, because their separate
+sessions would evade the wrapper's root-lineage accounting.
 
-These two policy flags are detectors, not pre-call gates: the current stock
-TUI keeps model tool calls inside Codex, so an external watcher can only stop
-the root once the spawn event is written.  Native rollout budget is a useful
-second guard, but it does not represent a total billed-token cap.
+## Notes
 
-## V2 policy
-
-`--v2-spawn-policy` automatically installs a per-launch `PreToolUse` hook and
-enables `multi_agent_v2`; it does not modify `~/.codex/config.toml`. The hook
-requires `fork_turns: none`, enforces the Sol allowance, and blocks nested
-`codex exec` commands that would bypass lineage accounting.
-
-Allow two explicitly requested Sol subagents while continuing to require
-`fork_turns: none`:
-
-```bash
-bound-codex-tokens --session 10M --compactions 2 \\
-  --v2-spawn-policy --max-sol-subagents 2 -- --yolo -m gpt-5.6-terra
-```
-
-The hook maintains this allowance per root session locally. It tells the main
-agent when it spends an allowance and blocks later Sol spawn attempts.
-
-The implementation uses the normal TUI instead of the SDK/App Server so that
-the terminal remains the normal Codex terminal. A custom App Server client can
-intercept calls before they are submitted.
+* The cap measures token totals reported in the fresh root-session lineage;
+  it is a local guardrail, not a claim about final provider billing categories.
+* The wrapper uses the regular Codex TUI, not a replacement client. It does not
+  change `~/.codex/config.toml`.
+* Run the no-cost checks with `bound-codex-tokens --self-test`.

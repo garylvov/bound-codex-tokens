@@ -18,6 +18,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+DEFAULT_SUMMARY_PROMPT = (
+    "Create a concise continuation handoff. Preserve completed actions, current state, "
+    "important assumptions, relevant tool outcomes, unresolved blockers, and the next concrete step."
+)
+
 
 def token_limit(value: str) -> int:
     match = re.fullmatch(r"([0-9][0-9_]*(?:\.[0-9]+)?)([KkMmBb]?)", value.strip())
@@ -185,12 +190,12 @@ def write_bundle(output_dir: Path, watch: SessionWatch, reason: str, tokens: int
     return bundle
 
 
-def run_summary(bundle: Path, model: str, effort: str, cwd: Path) -> Path:
+def run_summary(bundle: Path, model: str, effort: str, summary_prompt: str, cwd: Path) -> Path:
     handoff = bundle / "HANDOFF.md"
     prompt = (
         f"Read only {bundle / 'selected-transcript.md'} and {bundle / 'manifest.json'}. "
-        "Create a concise continuation handoff in the output file: goals, completed work, "
-        "current state, safe next steps, and unresolved risks. Do not read any session JSONL files."
+        f"{summary_prompt} Write the result to the output file. "
+        "Do not read any session JSONL files."
     )
     command = ["codex", "exec", "--skip-git-repo-check", "-C", str(cwd), "-s", "read-only",
                "-m", model, "-c", f"model_reasoning_effort={json.dumps(effort)}", "-o", str(handoff), prompt]
@@ -219,14 +224,17 @@ def without_initial_prompt(arguments: list[str]) -> list[str]:
     return result
 
 
-def v2_policy_config_args(max_sol_subagents: int, state_file: Path) -> list[str]:
+def v2_policy_config_args(max_sol_subagents: int, allowed_models: list[str], state_file: Path) -> list[str]:
     """Return a process-local PreToolUse hook config, without touching config.toml."""
     from bound_codex_tokens_hooks import v2_spawn_policy
 
-    command = shlex.join([
+    command_args = [
         sys.executable, str(Path(v2_spawn_policy.__file__).resolve()),
         "--max-sol-subagents", str(max_sol_subagents), "--state-file", str(state_file),
-    ])
+    ]
+    for model in allowed_models:
+        command_args.extend(["--allowed-model", model])
+    command = shlex.join(command_args)
     # TOML inline tables use `=` rather than JSON's `:`. Build it explicitly so
     # the hook command remains safely quoted even when its path contains spaces.
     value = ('[{ matcher = ".*", hooks = '
@@ -249,13 +257,21 @@ def main() -> int:
     parser.add_argument("--compactions", type=int, default=2, help="maximum automatic fresh-TUI resumes")
     parser.add_argument("--sessions-dir", type=Path, default=default_sessions_dir())
     parser.add_argument("--output-dir", type=Path, default=Path.cwd() / ".bound-codex-tokens")
-    parser.add_argument("--summary-model", default="gpt-5.6-luna", help="model used for the bounded handoff")
-    parser.add_argument("--summary-effort", default="medium", help="reasoning effort used for the handoff")
+    parser.add_argument("--summary-model", "--compaction-model", dest="summary_model", default="gpt-5.6-luna",
+                        help="model used for the bounded handoff")
+    parser.add_argument("--summary-effort", "--compaction-effort", dest="summary_effort", default="medium",
+                        help="reasoning effort used for the bounded handoff")
+    parser.add_argument("--summary-prompt", "--compaction-prompt", dest="summary_prompt", default=DEFAULT_SUMMARY_PROMPT,
+                        help="top-level instructions for the bounded handoff")
     parser.add_argument("--poll-seconds", type=float, default=2.0)
-    parser.add_argument("--deny-sol-subagents", action="store_true")
+    parser.add_argument("--deny-sol-subagents", action="store_true", default=True,
+                        help="stop when a Sol subagent is requested (default)")
+    parser.add_argument("--allow-sol-subagents", action="store_false", dest="deny_sol_subagents",
+                        help="permit Sol subagents outside the v2 policy hook")
     parser.add_argument("--require-fork-none", action="store_true")
     parser.add_argument("--v2-spawn-policy", action="store_true", help="enable pre-spawn v2 policy hook")
     parser.add_argument("--max-sol-subagents", type=int, default=0, help="Sol subagent allowance under v2 policy")
+    parser.add_argument("--allowed-subagent-model", action="append", default=[], help="allowed v2 subagent model; repeatable")
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("codex_args", nargs=argparse.REMAINDER, help="pass Codex TUI flags after --")
     args = parser.parse_args()
@@ -273,7 +289,7 @@ def main() -> int:
     first_launch = True
     cwd = Path.cwd()
     state_file = args.output_dir / f"v2-spawn-policy-{os.getpid()}.json"
-    policy_args = v2_policy_config_args(args.max_sol_subagents, state_file) if args.v2_spawn_policy else []
+    policy_args = v2_policy_config_args(args.max_sol_subagents, args.allowed_subagent_model, state_file) if args.v2_spawn_policy else []
     while True:
         baseline = discover_logs(args.sessions_dir)
         launch_args = (codex_args if first_launch else without_initial_prompt(codex_args) + [
@@ -298,7 +314,7 @@ def main() -> int:
             return process.wait()
         bundle = write_bundle(args.output_dir, watch, reason, watch.tokens)
         try:
-            handoff = run_summary(bundle, args.summary_model, args.summary_effort, cwd)
+            handoff = run_summary(bundle, args.summary_model, args.summary_effort, args.summary_prompt, cwd)
         except subprocess.CalledProcessError as exc:
             print(f"[bound] handoff failed ({exc.returncode}); bundle retained at {bundle}", file=sys.stderr)
             return exc.returncode
