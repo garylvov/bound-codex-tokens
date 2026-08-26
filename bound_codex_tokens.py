@@ -260,8 +260,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--total", "--session", dest="total", type=token_limit, default=10_000_000,
                         help="reported-token cap across all TUI segments; e.g. 10M")
-    parser.add_argument("--segment", type=token_limit, default=1_000_000,
-                        help="reported-token cap before a handoff and fresh TUI; default: 1M")
+    parser.add_argument("--segment", type=token_limit,
+                        help="optional reported-token cap before a handoff and fresh TUI")
     parser.add_argument("--compactions", type=int, default=2, help="maximum automatic fresh-TUI resumes")
     parser.add_argument("--sessions-dir", type=Path, default=default_sessions_dir())
     parser.add_argument("--output-dir", type=Path, default=Path.cwd() / ".bound-codex-tokens")
@@ -296,6 +296,11 @@ def main() -> int:
     if not args.sessions_dir.exists():
         parser.error(f"sessions directory not found: {args.sessions_dir}")
 
+    # A compaction count is a count of fresh-TUI resumes, so it permits one
+    # more TUI segment than its value. Split the total by default so the total
+    # budget remains useful rather than silently becoming an unreachable cap.
+    segment_limit = args.segment or (args.total + args.compactions) // (args.compactions + 1)
+
     rollovers = 0
     workflow_tokens = 0
     first_launch = True
@@ -310,7 +315,7 @@ def main() -> int:
         ]) + policy_args
         print(
             f"[bound] starting TUI segment {rollovers + 1}; "
-            f"segment cap {args.segment:,}, total cap {args.total:,} reported tokens",
+            f"segment cap {segment_limit:,}, total cap {args.total:,} reported tokens",
             flush=True,
         )
         process = subprocess.Popen(["codex", *launch_args], start_new_session=True)
@@ -326,8 +331,8 @@ def main() -> int:
                     f"workflow total cap reached: {workflow_tokens + watch.tokens:,} "
                     f">= {args.total:,}"
                 )
-            elif watch.root_id and watch.tokens >= args.segment:
-                reason = f"segment cap reached: {watch.tokens:,} >= {args.segment:,}"
+            elif watch.root_id and watch.tokens >= segment_limit:
+                reason = f"segment cap reached: {watch.tokens:,} >= {segment_limit:,}"
             if reason:
                 print(f"[bound] {reason}; stopping TUI", flush=True)
                 terminate(process)

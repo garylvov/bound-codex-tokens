@@ -6,9 +6,10 @@ workflow and its delegated work.
 
 ## The three controls
 
-1. **Bounded rollovers.** `--segment` bounds one TUI segment (1M by default);
-   `--total` bounds all TUI segments together; and `--compactions` is the
-   finite number of automatic fresh-TUI resumes. At a segment cap, the wrapper
+1. **Bounded rollovers.** `--total` bounds all TUI segments together, and
+   `--compactions` is the finite number of automatic fresh-TUI resumes. By
+   default, the total is divided across the permitted segments. `--segment`
+   optionally chooses a smaller per-segment cap. At a segment cap, the wrapper
    writes a small handoff and starts a fresh normal Codex TUI. At the total cap,
    or after the allowed rollovers, it writes one final handoff and stops.
 2. **Configurable handoffs.** The handoff uses Luna by default, but its model,
@@ -34,11 +35,11 @@ From a checkout, use `uv tool install .`.
 
 ## Examples
 
-Run the normal TUI with a 1M segment cap, a 10M workflow cap, and two automatic
-rollovers (`K`, `M`, and `B` are accepted):
+Run the normal TUI with a 10M workflow cap and two automatic rollovers (`K`,
+`M`, and `B` are accepted). This permits three segments of about 3.34M each:
 
 ```bash
-bound-codex-tokens --total 10M --segment 1M --compactions 2 -- --yolo -m gpt-5.6-terra
+bound-codex-tokens --total 10M --compactions 2 -- --yolo -m gpt-5.6-terra
 ```
 
 `--yolo` is passed straight through to Codex and gives it broad authority to
@@ -48,7 +49,7 @@ to let the unattended TUI change.
 Customize the bounded handoff (also called a compaction here) independently:
 
 ```bash
-bound-codex-tokens --total 10M --segment 1M --compactions 2 \
+bound-codex-tokens --total 10M --compactions 2 \
   --compaction-model gpt-5.6-terra --compaction-effort high \
   --compaction-prompt 'List completed work, tests, blockers, and the next exact action.' \
   -- --yolo
@@ -63,7 +64,7 @@ Enable guarded multi-agent v2, permit only Terra or Luna children, and permit
 no Sol children:
 
 ```bash
-bound-codex-tokens --total 10M --segment 1M --compactions 2 \
+bound-codex-tokens --total 10M --compactions 2 \
   --v2-spawn-policy --max-sol-subagents 0 \
   --allowed-subagent-models gpt-5.6-terra gpt-5.6-luna \
   -- --disable auto_review --yolo -m gpt-5.6-terra
