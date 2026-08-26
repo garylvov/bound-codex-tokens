@@ -335,7 +335,8 @@ def main() -> int:
     # A compaction count is a count of fresh-TUI resumes, so it permits one
     # more TUI segment than its value. Split the total by default so the total
     # budget remains useful rather than silently becoming an unreachable cap.
-    # For reference, 90% of Sol's original 1.05M-token context window is 945K.
+    # Codex's Sol manifest currently reports a 272K effective context window;
+    # 90% is 244.8K, conventionally rounded to a 245K segment guardrail.
     segment_limit = args.segment or (args.total + args.compactions) // (args.compactions + 1)
 
     rollovers = 0

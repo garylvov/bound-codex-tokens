@@ -43,9 +43,9 @@ bound-codex-tokens --total 10M --compactions 2 -- --yolo -m gpt-5.6-terra
 ```
 
 ```bash
-# Optional frequent-handoff guard: 945K is 90% of Sol's 1.05M context window.
+# Optional frequent-handoff guard: 245K is 90% of Codex Sol's 272K default context window.
 # This must fit every permitted segment: --segment × (1 + --compactions) <= --total.
-bound-codex-tokens --total 10M --segment 945K --compactions 2 -- --yolo
+bound-codex-tokens --total 10M --segment 245K --compactions 2 -- --yolo
 ```
 
 `--yolo` is passed straight through to Codex and gives it broad authority to
