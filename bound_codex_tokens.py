@@ -277,9 +277,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--total", "--session", dest="total", type=token_limit, default=10_000_000,
                         help="reported-token cap across all TUI segments; e.g. 10M")
-    parser.add_argument("--segment", type=token_limit,
-                        help="optional reported-token cap before a handoff and fresh TUI")
-    parser.add_argument("--compactions", type=int, default=2, help="maximum automatic fresh-TUI resumes")
+    parser.add_argument("--rollover-every", "--segment", dest="rollover_every", type=token_limit, default=245_000,
+                        help="reported tokens before one handoff and fresh TUI; default: 245K")
+    parser.add_argument("--max-rollovers", "--compactions", dest="max_rollovers", type=int,
+                        help="maximum handoff-and-fresh-TUI cycles; default uses the total budget")
     parser.add_argument("--sessions-dir", type=Path, default=default_sessions_dir())
     parser.add_argument("--output-dir", type=Path, default=Path.cwd() / ".bound-codex-tokens")
     parser.add_argument("--summary-model", "--compaction-model", dest="summary_model", default="gpt-5.6-luna",
@@ -308,14 +309,14 @@ def main() -> int:
     args = parser.parse_args()
     if args.self_test:
         return self_test()
-    if args.compactions < 0:
-        parser.error("--compactions must be zero or greater")
+    if args.max_rollovers is not None and args.max_rollovers < 0:
+        parser.error("--max-rollovers must be zero or greater")
     if args.max_sol_subagents < 0:
         parser.error("--max-sol-subagents must be zero or greater")
-    if args.segment and args.segment * (args.compactions + 1) > args.total:
+    if args.max_rollovers is not None and args.rollover_every * (args.max_rollovers + 1) > args.total:
         parser.error(
-            "--segment × (initial TUI + --compactions) must not exceed --total; "
-            "lower --segment, lower --compactions, or raise --total"
+            "--rollover-every × (initial TUI + --max-rollovers) must not exceed --total; "
+            "lower --rollover-every, lower --max-rollovers, or raise --total"
         )
     if args.summary_prompt and args.summary_prompt_file:
         parser.error("use only one of --compaction-prompt and --compaction-prompt-file")
@@ -332,12 +333,14 @@ def main() -> int:
     if not args.sessions_dir.exists():
         parser.error(f"sessions directory not found: {args.sessions_dir}")
 
-    # A compaction count is a count of fresh-TUI resumes, so it permits one
-    # more TUI segment than its value. Split the total by default so the total
-    # budget remains useful rather than silently becoming an unreachable cap.
+    # A rollover is a handoff plus a fresh-TUI resume, so it permits one more
+    # segment than its value. If omitted, choose enough full 245K segments to
+    # stay within the total cap (the total itself remains the hard upper bound).
     # Codex's Sol manifest currently reports a 272K effective context window;
     # 90% is 244.8K, conventionally rounded to a 245K segment guardrail.
-    segment_limit = args.segment or (args.total + args.compactions) // (args.compactions + 1)
+    max_rollovers = args.max_rollovers
+    if max_rollovers is None:
+        max_rollovers = max(0, args.total // args.rollover_every - 1)
 
     rollovers = 0
     workflow_tokens = 0
@@ -358,7 +361,8 @@ def main() -> int:
         ]) + policy_args
         print(
             f"[bound] starting TUI segment {rollovers + 1}; "
-            f"segment cap {segment_limit:,}, total cap {args.total:,} reported tokens",
+            f"rollover every {args.rollover_every:,}, max rollovers {max_rollovers}, "
+            f"total cap {args.total:,} reported tokens",
             flush=True,
         )
         process = subprocess.Popen(["codex", *launch_args], start_new_session=True)
@@ -374,8 +378,8 @@ def main() -> int:
                     f"workflow total cap reached: {workflow_tokens + watch.tokens:,} "
                     f">= {args.total:,}"
                 )
-            elif watch.root_id and watch.tokens >= segment_limit:
-                reason = f"segment cap reached: {watch.tokens:,} >= {segment_limit:,}"
+            elif watch.root_id and watch.tokens >= args.rollover_every:
+                reason = f"rollover cap reached: {watch.tokens:,} >= {args.rollover_every:,}"
             if reason:
                 print(f"[bound] {reason}; stopping TUI", flush=True)
                 terminate(process)
@@ -389,7 +393,7 @@ def main() -> int:
         except subprocess.CalledProcessError as exc:
             print(f"[bound] handoff failed ({exc.returncode}); bundle retained at {bundle}", file=sys.stderr)
             return exc.returncode
-        if "workflow total cap reached" in reason or rollovers >= args.compactions:
+        if "workflow total cap reached" in reason or rollovers >= max_rollovers:
             print(
                 f"[bound] automatic resume limit reached; final handoff: {handoff}\n"
                 "[bound] No new TUI was started. Resume manually from this handoff when ready.",
