@@ -65,8 +65,7 @@ no Sol children:
 ```bash
 bound-codex-tokens --session 10M --compactions 2 \
   --v2-spawn-policy --max-sol-subagents 0 \
-  --allowed-subagent-model gpt-5.6-terra \
-  --allowed-subagent-model gpt-5.6-luna \
+  --allowed-subagent-models gpt-5.6-terra gpt-5.6-luna \
   -- --disable auto_review --yolo -m gpt-5.6-terra
 ```
 

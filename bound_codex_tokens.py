@@ -35,6 +35,11 @@ def token_limit(value: str) -> int:
     return result
 
 
+def model_list(values: list[str]) -> list[str]:
+    """Normalize one CLI model list, accepting commas for shell convenience."""
+    return [model.strip() for value in values for model in value.split(",") if model.strip()]
+
+
 def default_sessions_dir() -> Path:
     codex_home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
     return codex_home / "sessions"
@@ -271,7 +276,10 @@ def main() -> int:
     parser.add_argument("--require-fork-none", action="store_true")
     parser.add_argument("--v2-spawn-policy", action="store_true", help="enable pre-spawn v2 policy hook")
     parser.add_argument("--max-sol-subagents", type=int, default=0, help="Sol subagent allowance under v2 policy")
-    parser.add_argument("--allowed-subagent-model", action="append", default=[], help="allowed v2 subagent model; repeatable")
+    parser.add_argument("--allowed-subagent-models", nargs="+", default=[], metavar="MODEL",
+                        help="space- or comma-separated allowed v2 subagent models")
+    parser.add_argument("--allowed-subagent-model", action="append", dest="allowed_subagent_model_legacy", default=[],
+                        help=argparse.SUPPRESS)
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("codex_args", nargs=argparse.REMAINDER, help="pass Codex TUI flags after --")
     args = parser.parse_args()
@@ -289,7 +297,8 @@ def main() -> int:
     first_launch = True
     cwd = Path.cwd()
     state_file = args.output_dir / f"v2-spawn-policy-{os.getpid()}.json"
-    policy_args = v2_policy_config_args(args.max_sol_subagents, args.allowed_subagent_model, state_file) if args.v2_spawn_policy else []
+    allowed_models = model_list(args.allowed_subagent_models) + args.allowed_subagent_model_legacy
+    policy_args = v2_policy_config_args(args.max_sol_subagents, allowed_models, state_file) if args.v2_spawn_policy else []
     while True:
         baseline = discover_logs(args.sessions_dir)
         launch_args = (codex_args if first_launch else without_initial_prompt(codex_args) + [
