@@ -6,13 +6,12 @@ workflow and its delegated work.
 
 ## The three controls
 
-1. **Explicit bounded compacts.** All three controls are required:
-   `--total-tokens` is the hard cap across every root-plus-subagent lineage and
-   TUI segment; `--compact-every` is the summed root-plus-subagent lineage
-   token point at which the wrapper writes a handoff and opens a fresh TUI; and
-   `--max-compacts-num` is exactly the
-   number of those automatic handoff-and-restart cycles permitted. At either
-   limit, it writes one final handoff and stops.
+1. **Separate root and child budgets.** All four controls are required:
+   `--total-tokens` is the hard combined cap; `--root-compact-every` triggers
+   a root-TUI handoff only from root usage; `--subagent-total-tokens` limits all
+   children together and stops the workflow rather than compacting the root;
+   `--max-compacts-num` is the number of allowed root handoff-and-restart
+   cycles.
 2. **Configurable handoffs.** The handoff uses Luna by default, but its model,
    reasoning effort, and prompt are independent of the interactive TUI. The
    prompt is a top-level versioned Markdown file so the continuation format is
@@ -40,15 +39,17 @@ From a checkout, use `uv tool install .`.
 Run the normal TUI with explicit limits. `K`, `M`, and `B` are accepted:
 
 ```bash
-bound-codex-tokens --total-tokens 10M --compact-every 800K --max-compacts-num 2 \
+bound-codex-tokens --total-tokens 10M --root-compact-every 800K \
+  --subagent-total-tokens 2M --max-compacts-num 2 \
   -- --yolo -m gpt-5.6-terra
 ```
 
 ```bash
-# Exactly two compacts means: initial TUI → handoff/restart → handoff/restart → final handoff.
-# 245K is the combined root + discovered-subagent lineage budget, not 245K per agent.
+# Exactly two root compacts means: initial TUI → handoff/restart → handoff/restart → final handoff.
+# 245K applies only to root usage; children have their own 2M aggregate budget.
 # It is also 90% of Codex Sol's 272K default context window.
-bound-codex-tokens --total-tokens 10M --compact-every 245K --max-compacts-num 2 -- --yolo
+bound-codex-tokens --total-tokens 10M --root-compact-every 245K \
+  --subagent-total-tokens 2M --max-compacts-num 2 -- --yolo
 ```
 
 `--yolo` is passed straight through to Codex and gives it broad authority to
@@ -58,7 +59,8 @@ to let the unattended TUI change.
 Customize the bounded handoff (also called a compaction here) independently:
 
 ```bash
-bound-codex-tokens --total-tokens 10M --compact-every 800K --max-compacts-num 2 \
+bound-codex-tokens --total-tokens 10M --root-compact-every 800K \
+  --subagent-total-tokens 2M --max-compacts-num 2 \
   --compaction-model gpt-5.6-terra --compaction-effort high \
   --compaction-prompt-file ./my-handoff-prompt.md \
   -- --yolo
@@ -81,7 +83,8 @@ Enable guarded multi-agent v2, permit only Terra or Luna children, and permit
 no Sol children:
 
 ```bash
-bound-codex-tokens --total-tokens 10M --compact-every 800K --max-compacts-num 2 \
+bound-codex-tokens --total-tokens 10M --root-compact-every 800K \
+  --subagent-total-tokens 2M --max-compacts-num 2 \
   --no-fork --max-sol-subagents 0 \
   --allowed-subagent-models gpt-5.6-terra gpt-5.6-luna \
   -- --enable multi_agent_v2 --disable auto_review --yolo -m gpt-5.6-terra \
@@ -105,11 +108,13 @@ sessions would evade the wrapper's root-lineage accounting.
 
 ## Notes
 
-* Both token limits sum the root TUI and every discovered child session in its
-  lineage, including previous TUI segments. The final handoff is a separate
-  Luna/Terra call and is not part of this total. Under `--no-fork`, nested
-  `codex exec` calls are blocked because they would evade this lineage. This is
-  a local guardrail, not a claim about final provider billing categories.
+* `--total-tokens` sums the root TUI and every discovered child session in its
+  lineage, including previous TUI segments. The root compact budget counts only
+  the active root TUI; the subagent budget counts all discovered children. The
+  final handoff is a separate Luna/Terra call and is not part of this total.
+  Under `--no-fork`, nested `codex exec` calls are blocked because they would
+  evade this lineage. This is a local guardrail, not a claim about final
+  provider billing categories.
 * The wrapper uses the regular Codex TUI, not a replacement client. It does not
   change `~/.codex/config.toml`.
 * Run the no-cost checks with `bound-codex-tokens --self-test`.

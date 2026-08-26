@@ -37,7 +37,7 @@ class BudgetFlowTest(unittest.TestCase):
             self.assertIn(marker, selected)
 
     def test_visible_budget_prompt_is_rendered(self) -> None:
-        prompt = app.render_session_prompt(10, 30, 20, 2)
+        prompt = app.render_session_prompt(10, 30, 20, 8, 5, 2)
         self.assertIn("10 reported tokens", prompt)
         self.assertIn("30", prompt)
         self.assertIn("20", prompt)
@@ -63,12 +63,16 @@ class BudgetFlowTest(unittest.TestCase):
             watch = app.SessionWatch(root, set(), deny_sol=False, require_none=False)
             watch.poll()
             self.assertEqual(watch.tokens, 10)
+            self.assertEqual(watch.root_tokens, 7)
+            self.assertEqual(watch.subagent_tokens, 3)
             self.assertEqual(len(watch.related_paths()), 2)
 
             with child_log.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(self.token_record(4, 7)) + "\n")
             watch.poll()
             self.assertEqual(watch.tokens, 14)
+            self.assertEqual(watch.root_tokens, 7)
+            self.assertEqual(watch.subagent_tokens, 7)
 
 
 if __name__ == "__main__":
