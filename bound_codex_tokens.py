@@ -275,12 +275,12 @@ def self_test() -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--total", "--session", dest="total", type=token_limit, default=10_000_000,
-                        help="reported-token cap across all TUI segments; e.g. 10M")
-    parser.add_argument("--rollover-every", "--segment", dest="rollover_every", type=token_limit, default=245_000,
-                        help="reported tokens before one handoff and fresh TUI; default: 245K")
-    parser.add_argument("--max-rollovers", "--compactions", dest="max_rollovers", type=int,
-                        help="maximum handoff-and-fresh-TUI cycles; default uses the total budget")
+    parser.add_argument("--total-tokens", "--total", "--session", dest="total", type=token_limit,
+                        help="hard reported-token cap across all TUI segments; e.g. 10M")
+    parser.add_argument("--compact-every", "--rollover-every", "--segment", dest="rollover_every", type=token_limit,
+                        help="reported tokens before one handoff and fresh TUI; e.g. 245K")
+    parser.add_argument("--max-compacts-num", "--max-rollovers", "--compactions", dest="max_rollovers", type=int,
+                        help="maximum automatic handoff-and-fresh-TUI cycles")
     parser.add_argument("--sessions-dir", type=Path, default=default_sessions_dir())
     parser.add_argument("--output-dir", type=Path, default=Path.cwd() / ".bound-codex-tokens")
     parser.add_argument("--summary-model", "--compaction-model", dest="summary_model", default="gpt-5.6-luna",
@@ -309,14 +309,21 @@ def main() -> int:
     args = parser.parse_args()
     if args.self_test:
         return self_test()
-    if args.max_rollovers is not None and args.max_rollovers < 0:
-        parser.error("--max-rollovers must be zero or greater")
+    missing = [name for name, value in (
+        ("--total-tokens", args.total),
+        ("--compact-every", args.rollover_every),
+        ("--max-compacts-num", args.max_rollovers),
+    ) if value is None]
+    if missing:
+        parser.error("required for supervised runs: " + ", ".join(missing))
+    if args.max_rollovers < 0:
+        parser.error("--max-compacts-num must be zero or greater")
     if args.max_sol_subagents < 0:
         parser.error("--max-sol-subagents must be zero or greater")
-    if args.max_rollovers is not None and args.rollover_every * (args.max_rollovers + 1) > args.total:
+    if args.rollover_every * (args.max_rollovers + 1) > args.total:
         parser.error(
-            "--rollover-every × (initial TUI + --max-rollovers) must not exceed --total; "
-            "lower --rollover-every, lower --max-rollovers, or raise --total"
+            "--compact-every × (initial TUI + --max-compacts-num) must not exceed --total-tokens; "
+            "lower --compact-every, lower --max-compacts-num, or raise --total-tokens"
         )
     if args.summary_prompt and args.summary_prompt_file:
         parser.error("use only one of --compaction-prompt and --compaction-prompt-file")
@@ -333,14 +340,9 @@ def main() -> int:
     if not args.sessions_dir.exists():
         parser.error(f"sessions directory not found: {args.sessions_dir}")
 
-    # A rollover is a handoff plus a fresh-TUI resume, so it permits one more
-    # segment than its value. If omitted, choose enough full 245K segments to
-    # stay within the total cap (the total itself remains the hard upper bound).
-    # Codex's Sol manifest currently reports a 272K effective context window;
-    # 90% is 244.8K, conventionally rounded to a 245K segment guardrail.
+    # A compact is a handoff plus a fresh-TUI resume, so it permits one more
+    # TUI segment than its value. Every budget control is explicit at the CLI.
     max_rollovers = args.max_rollovers
-    if max_rollovers is None:
-        max_rollovers = max(0, args.total // args.rollover_every - 1)
 
     rollovers = 0
     workflow_tokens = 0
@@ -361,7 +363,7 @@ def main() -> int:
         ]) + policy_args
         print(
             f"[bound] starting TUI segment {rollovers + 1}; "
-            f"rollover every {args.rollover_every:,}, max rollovers {max_rollovers}, "
+            f"compact every {args.rollover_every:,}, max compacts {max_rollovers}, "
             f"total cap {args.total:,} reported tokens",
             flush=True,
         )

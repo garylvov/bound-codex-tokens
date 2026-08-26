@@ -6,11 +6,12 @@ workflow and its delegated work.
 
 ## The three controls
 
-1. **Bounded rollovers.** `--total` is the hard cap across all TUI segments.
-   `--rollover-every` is the reported-token point at which the wrapper writes a
-   handoff and opens a fresh TUI. `--max-rollovers` is exactly the number of
-   those automatic handoff-and-restart cycles permitted. At either limit, it
-   writes one final handoff and stops.
+1. **Explicit bounded compacts.** All three controls are required:
+   `--total-tokens` is the hard cap across all TUI segments;
+   `--compact-every` is the reported-token point at which the wrapper writes a
+   handoff and opens a fresh TUI; and `--max-compacts-num` is exactly the
+   number of those automatic handoff-and-restart cycles permitted. At either
+   limit, it writes one final handoff and stops.
 2. **Configurable handoffs.** The handoff uses Luna by default, but its model,
    reasoning effort, and prompt are independent of the interactive TUI. The
    prompt is a top-level option so the continuation format is predictable.
@@ -34,18 +35,17 @@ From a checkout, use `uv tool install .`.
 
 ## Examples
 
-Run the normal TUI with a 10M workflow cap. `K`, `M`, and `B` are accepted.
-The default rollover point is 245K, and the default rollover count is derived
-from the total so it stays below that cap:
+Run the normal TUI with explicit limits. `K`, `M`, and `B` are accepted:
 
 ```bash
-bound-codex-tokens --total 10M -- --yolo -m gpt-5.6-terra
+bound-codex-tokens --total-tokens 10M --compact-every 800K --max-compacts-num 2 \
+  -- --yolo -m gpt-5.6-terra
 ```
 
 ```bash
-# Exactly two rollovers means: initial TUI → handoff/restart → handoff/restart → final handoff.
+# Exactly two compacts means: initial TUI → handoff/restart → handoff/restart → final handoff.
 # 245K is 90% of Codex Sol's 272K default context window.
-bound-codex-tokens --total 10M --rollover-every 245K --max-rollovers 2 -- --yolo
+bound-codex-tokens --total-tokens 10M --compact-every 245K --max-compacts-num 2 -- --yolo
 ```
 
 `--yolo` is passed straight through to Codex and gives it broad authority to
@@ -55,7 +55,7 @@ to let the unattended TUI change.
 Customize the bounded handoff (also called a compaction here) independently:
 
 ```bash
-bound-codex-tokens --total 10M --max-rollovers 2 \
+bound-codex-tokens --total-tokens 10M --compact-every 800K --max-compacts-num 2 \
   --compaction-model gpt-5.6-terra --compaction-effort high \
   --compaction-prompt-file ./my-handoff-prompt.md \
   -- --yolo
@@ -74,7 +74,7 @@ Enable guarded multi-agent v2, permit only Terra or Luna children, and permit
 no Sol children:
 
 ```bash
-bound-codex-tokens --total 10M --max-rollovers 2 \
+bound-codex-tokens --total-tokens 10M --compact-every 800K --max-compacts-num 2 \
   --no-fork --max-sol-subagents 0 \
   --allowed-subagent-models gpt-5.6-terra gpt-5.6-luna \
   -- --enable multi_agent_v2 --disable auto_review --yolo -m gpt-5.6-terra \
