@@ -67,7 +67,7 @@ bound-codex-tokens --session 10M --compactions 2 \
   --v2-spawn-policy --max-sol-subagents 0 \
   --allowed-subagent-model gpt-5.6-terra \
   --allowed-subagent-model gpt-5.6-luna \
-  -- --yolo -m gpt-5.6-terra
+  -- --disable auto_review --yolo -m gpt-5.6-terra
 ```
 
 `--v2-spawn-policy` automatically supplies the full Codex flag
@@ -77,6 +77,10 @@ large main context from being charged again to every delegated child. Use
 `--max-sol-subagents 2` to allow exactly two Sol children. Without a v2 policy,
 Sol is still denied by default; use `--allow-sol-subagents` only when that is
 intentional.
+
+`--disable auto_review` is passed to Codex and makes that choice explicit for
+these long-running sessions. It is separate from `--yolo`, which controls
+approval and sandbox bypass.
 
 The v2 hook also blocks nested `codex exec` calls, because their separate
 sessions would evade the wrapper's root-lineage accounting.
