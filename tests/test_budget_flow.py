@@ -44,6 +44,22 @@ class BudgetFlowTest(unittest.TestCase):
         self.assertIn("20", prompt)
         self.assertIn("2 automatic compacts", prompt)
 
+    def test_dollar_estimate_uses_explicit_model_mix_and_tier(self) -> None:
+        # $200 at the documented standard Terra rates: 90% × $1 input plus
+        # 10% × $6 output = $1.50 per 1M total tokens.
+        tokens = app.estimated_tokens_for_budget(
+            200, "gpt-5.6-terra", "standard", 0.9, False,
+        )
+        self.assertEqual(tokens, 133_333_333)
+        self.assertIn("~119,999,999 input", app.budget_description(
+            200, tokens, "gpt-5.6-terra", "standard", 0.9, False,
+        ))
+        self.assertAlmostEqual(
+            app.estimated_cost(tokens, "gpt-5.6-terra", "standard", 0.9, False),
+            200,
+            places=4,
+        )
+
     def test_subagent_lineage_counts_parent_and_child_updates(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

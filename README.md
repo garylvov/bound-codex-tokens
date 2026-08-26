@@ -35,6 +35,41 @@ This is intentionally a safety wrapper, not a substitute for Codex: the TUI
 stays attached, so a long-running workflow can still make progress while the
 wrapper bounds its lifecycle.
 
+## Dollar and credit estimates
+
+Use a dollar estimate in place of `--total-tokens`:
+
+```bash
+bound-codex-tokens --budget-usd 200 --cost-model gpt-5.6-terra \
+  --root-compact-every 800K --subagent-compact-every 500K \
+  --max-compacts-num 2 -- --yolo -m gpt-5.6-terra
+```
+
+The default is the official **standard** API list-price row and a deliberately
+explicit estimate of 90% input / 10% output. At that mix, `$200` is about
+`133.3M` reported tokens for Terra (`~120M` input, `~13.3M` output), `71.4M`
+for Sol, or `1.33B` for Luna. Select `--price-tier fast`,
+`--long-context-pricing`, or `--estimated-input-share 0.95` when those better
+match the planned workload. Inspect the bundled table with `--show-pricing`.
+
+The table is a versioned snapshot of the official [OpenAI pricing
+page](https://developers.openai.com/api/docs/pricing), retrieved 2026-08-25.
+It is an API-list-price planning conversion, not a guaranteed Codex charge:
+the session logs report total tokens but do not expose cached input, reasoning,
+tool charges, service tier, or any plan-specific credit conversion.
+
+For an internal credit system, state the local conversion explicitly:
+
+```bash
+bound-codex-tokens --budget-credits 200 --usd-per-credit 1 \
+  --cost-model gpt-5.6-terra --root-compact-every 800K \
+  --subagent-compact-every 500K --max-compacts-num 2 -- --yolo
+```
+
+There is no universal public `Codex credit → dollar` rate, so
+`--budget-credits` intentionally requires `--usd-per-credit`. A provider-side
+spend limit is still needed for a true money ceiling.
+
 ## Install
 
 ```bash
@@ -125,6 +160,12 @@ sessions would evade the wrapper's root-lineage accounting.
   Under `--no-fork`, nested `codex exec` calls are blocked because they would
   evade this lineage. This is a local guardrail, not a claim about final
   provider billing categories.
+* The watcher discovers new JSONL session files and polls them every two
+  seconds by default (`--poll-seconds`). It can act only after Codex writes a
+  `token_count` event, so a running turn can overshoot a threshold. It counts
+  a newly spawned child once its parent linkage is written. It cannot safely
+  account for an old child session resumed outside this wrapper's new-session
+  lineage; do not use native child resume as a way around a budget.
 * The wrapper uses the regular Codex TUI, not a replacement client. It does not
   change `~/.codex/config.toml`.
 * Run the no-cost checks with `bound-codex-tokens --self-test`.

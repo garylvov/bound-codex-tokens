@@ -19,6 +19,25 @@ from pathlib import Path
 from typing import Any
 
 
+# Snapshot of https://developers.openai.com/api/docs/pricing (retrieved 2026-08-25).
+# These are API list prices per 1M tokens, not a conversion for a Codex plan's
+# credits or a guarantee of the amount that will appear on an invoice.
+PRICING_SOURCE_URL = "https://developers.openai.com/api/docs/pricing"
+PRICING_RETRIEVED = "2026-08-25"
+PRICE_TABLE: dict[str, dict[str, dict[str, float]]] = {
+    "standard": {
+        "gpt-5.6-sol": {"input": 2.00, "output": 10.00, "long_input": 4.00, "long_output": 15.00},
+        "gpt-5.6-terra": {"input": 1.00, "output": 6.00, "long_input": 2.00, "long_output": 9.00},
+        "gpt-5.6-luna": {"input": 0.10, "output": 0.60, "long_input": 0.20, "long_output": 0.90},
+    },
+    "fast": {
+        "gpt-5.6-sol": {"input": 4.00, "output": 20.00, "long_input": 8.00, "long_output": 30.00},
+        "gpt-5.6-terra": {"input": 2.00, "output": 12.00, "long_input": 4.00, "long_output": 18.00},
+        "gpt-5.6-luna": {"input": 0.20, "output": 1.20, "long_input": 0.40, "long_output": 1.80},
+    },
+}
+
+
 def default_summary_prompt() -> str:
     """Read the versioned prompt distributed with this release."""
     from importlib.resources import files
@@ -59,6 +78,58 @@ def nonnegative_token_limit(value: str) -> int:
     if value.strip() == "0":
         return 0
     return token_limit(value)
+
+
+def money(value: str) -> float:
+    """Accept a positive dollar/credit amount, optionally written as $200."""
+    normalized = value.strip().replace("$", "")
+    try:
+        result = float(normalized)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("use a positive amount, e.g. 200 or $200") from exc
+    if result <= 0:
+        raise argparse.ArgumentTypeError("must be a positive amount")
+    return result
+
+
+def proportion(value: str) -> float:
+    try:
+        result = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a number from 0 through 1") from exc
+    if not 0 <= result <= 1:
+        raise argparse.ArgumentTypeError("must be a number from 0 through 1")
+    return result
+
+
+def estimated_tokens_for_budget(amount_usd: float, model: str, price_tier: str,
+                                input_share: float, long_context: bool) -> int:
+    """Convert an API-list-price estimate to reported total tokens."""
+    prices = PRICE_TABLE[price_tier][model]
+    input_price = prices["long_input"] if long_context else prices["input"]
+    output_price = prices["long_output"] if long_context else prices["output"]
+    blended_per_million = input_share * input_price + (1 - input_share) * output_price
+    return int(amount_usd * 1_000_000 / blended_per_million)
+
+
+def estimated_cost(tokens: int, model: str, price_tier: str, input_share: float,
+                   long_context: bool) -> float:
+    prices = PRICE_TABLE[price_tier][model]
+    input_price = prices["long_input"] if long_context else prices["input"]
+    output_price = prices["long_output"] if long_context else prices["output"]
+    return tokens / 1_000_000 * (input_share * input_price + (1 - input_share) * output_price)
+
+
+def budget_description(amount_usd: float, total_tokens: int, model: str, price_tier: str,
+                       input_share: float, long_context: bool) -> str:
+    input_tokens = int(total_tokens * input_share)
+    output_tokens = total_tokens - input_tokens
+    context_label = "long-context" if long_context else "standard-context"
+    return (
+        f"${amount_usd:g} API-list-price estimate ({model}, {price_tier}, {context_label}, "
+        f"{input_share:.0%} input / {1 - input_share:.0%} output) => "
+        f"{total_tokens:,} reported tokens (~{input_tokens:,} input, ~{output_tokens:,} output)"
+    )
 
 
 def model_list(values: list[str]) -> list[str]:
@@ -300,6 +371,8 @@ def v2_policy_config_args(max_sol_subagents: int, allowed_models: list[str], sta
 def self_test() -> int:
     assert token_limit("500") == 500
     assert token_limit("10M") == 10_000_000
+    assert money("$200") == 200
+    assert estimated_tokens_for_budget(200, "gpt-5.6-terra", "standard", 0.9, False) == 133_333_333
     assert without_initial_prompt(["--yolo", "-m", "gpt-5.6-luna", "hello"]) == ["--yolo", "-m", "gpt-5.6-luna"]
     assert v2_already_enabled(["--enable", "multi_agent_v2"])
     assert v2_already_enabled(["--enable=multi_agent_v2"])
@@ -311,8 +384,25 @@ def self_test() -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--total-tokens", "--total", "--session", dest="total", type=token_limit,
+    budget = parser.add_mutually_exclusive_group()
+    budget.add_argument("--total-tokens", "--total", "--session", dest="total", type=token_limit,
                         help="hard root-plus-subagent-lineage token cap across all TUI segments; e.g. 10M")
+    budget.add_argument("--budget-usd", type=money,
+                        help="derive an estimated token cap from API list price; e.g. $200 (not a bill ceiling)")
+    budget.add_argument("--budget-credits", type=money,
+                        help="derive an estimated token cap from your own credits; requires --usd-per-credit")
+    parser.add_argument("--usd-per-credit", type=money,
+                        help="your credit's dollar value; required with --budget-credits")
+    parser.add_argument("--cost-model", choices=sorted(PRICE_TABLE["standard"]), default="gpt-5.6-terra",
+                        help="model for a dollar/credit estimate (default: gpt-5.6-terra)")
+    parser.add_argument("--price-tier", choices=sorted(PRICE_TABLE), default="standard",
+                        help="official API list-price tier for a dollar/credit estimate (default: standard)")
+    parser.add_argument("--estimated-input-share", type=proportion, default=0.9,
+                        help="estimated input fraction for a dollar/credit estimate (default: 0.9)")
+    parser.add_argument("--long-context-pricing", action="store_true",
+                        help="use the official long-context list-price row for the estimate")
+    parser.add_argument("--show-pricing", action="store_true",
+                        help="print the bundled official API list-price snapshot and exit")
     parser.add_argument("--root-compact-every", "--compact-every", "--rollover-every", "--segment",
                         dest="root_compact_every", type=token_limit,
                         help="root-TUI tokens before one handoff and fresh TUI; e.g. 245K")
@@ -348,6 +438,41 @@ def main() -> int:
     args = parser.parse_args()
     if args.self_test:
         return self_test()
+    if args.show_pricing:
+        print(f"API list-price snapshot: {PRICING_SOURCE_URL} (retrieved {PRICING_RETRIEVED})")
+        print("Prices below are USD per 1M tokens: input/output; long-context input/output.")
+        for tier, models in PRICE_TABLE.items():
+            print(tier + ":")
+            for model, prices in models.items():
+                print(
+                    f"  {model}: ${prices['input']:g}/${prices['output']:g}; "
+                    f"${prices['long_input']:g}/${prices['long_output']:g}"
+                )
+        return 0
+    if args.budget_credits is not None and args.usd_per_credit is None:
+        parser.error("--budget-credits requires --usd-per-credit; Codex credits have no universal public dollar conversion")
+    if args.usd_per_credit is not None and args.budget_credits is None:
+        parser.error("--usd-per-credit is only used with --budget-credits")
+    estimate_usd: float | None = args.budget_usd
+    if args.budget_credits is not None:
+        estimate_usd = args.budget_credits * args.usd_per_credit
+    if estimate_usd is not None:
+        args.total = estimated_tokens_for_budget(
+            estimate_usd, args.cost_model, args.price_tier,
+            args.estimated_input_share, args.long_context_pricing,
+        )
+        print(
+            "[bound] " + budget_description(
+                estimate_usd, args.total, args.cost_model, args.price_tier,
+                args.estimated_input_share, args.long_context_pricing,
+            ),
+            flush=True,
+        )
+        print(
+            "[bound] Estimate only: reported logs do not expose cached-input, reasoning, tool, "
+            "or Codex-plan credit billing. Use a provider-side spend limit for a true money ceiling.",
+            flush=True,
+        )
     missing = [name for name, value in (
         ("--total-tokens", args.total),
         ("--root-compact-every", args.root_compact_every),
@@ -385,6 +510,17 @@ def main() -> int:
     # TUI segment than its value. Every budget control is explicit at the CLI.
     max_rollovers = args.max_rollovers
     effective_cap = min(args.total, (args.root_compact_every + args.subagent_compact_every) * segment_count)
+    if estimate_usd is not None:
+        effective_estimate = estimated_cost(
+            effective_cap, args.cost_model, args.price_tier,
+            args.estimated_input_share, args.long_context_pricing,
+        )
+        print(
+            f"[bound] These compact settings can use at most {effective_cap:,} reported tokens "
+            f"(~${effective_estimate:,.2f} under that same estimate), below the "
+            f"${estimate_usd:g} global planning budget.",
+            flush=True,
+        )
 
     rollovers = 0
     workflow_tokens = 0
