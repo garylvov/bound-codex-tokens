@@ -18,10 +18,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-DEFAULT_SUMMARY_PROMPT = (
-    "Create a concise continuation handoff. Preserve completed actions, current state, "
-    "important assumptions, relevant tool outcomes, unresolved blockers, and the next concrete step."
-)
+
+def default_summary_prompt() -> str:
+    """Read the versioned prompt distributed with this release."""
+    from importlib.resources import files
+
+    return files("bound_codex_tokens_assets").joinpath("compaction.md").read_text(encoding="utf-8").strip()
 
 
 def token_limit(value: str) -> int:
@@ -284,15 +286,18 @@ def main() -> int:
                         help="model used for the bounded handoff")
     parser.add_argument("--summary-effort", "--compaction-effort", dest="summary_effort", default="medium",
                         help="reasoning effort used for the bounded handoff")
-    parser.add_argument("--summary-prompt", "--compaction-prompt", dest="summary_prompt", default=DEFAULT_SUMMARY_PROMPT,
+    parser.add_argument("--summary-prompt", "--compaction-prompt", dest="summary_prompt",
                         help="top-level instructions for the bounded handoff")
+    parser.add_argument("--summary-prompt-file", "--compaction-prompt-file", dest="summary_prompt_file", type=Path,
+                        help="Markdown/text file containing handoff instructions")
     parser.add_argument("--poll-seconds", type=float, default=2.0)
     parser.add_argument("--deny-sol-subagents", action="store_true", default=True,
                         help="stop when a Sol subagent is requested (default)")
     parser.add_argument("--allow-sol-subagents", action="store_false", dest="deny_sol_subagents",
                         help="permit Sol subagents outside the v2 policy hook")
     parser.add_argument("--require-fork-none", action="store_true")
-    parser.add_argument("--v2-spawn-policy", action="store_true", help="enable pre-spawn v2 policy hook")
+    parser.add_argument("--no-fork", "--v2-spawn-policy", dest="v2_spawn_policy", action="store_true",
+                        help="enable v2 and require fork_turns: none for subagents")
     parser.add_argument("--max-sol-subagents", type=int, default=0, help="Sol subagent allowance under v2 policy")
     parser.add_argument("--allowed-subagent-models", nargs="+", default=[], metavar="MODEL",
                         help="space- or comma-separated allowed v2 subagent models")
@@ -307,6 +312,17 @@ def main() -> int:
         parser.error("--compactions must be zero or greater")
     if args.max_sol_subagents < 0:
         parser.error("--max-sol-subagents must be zero or greater")
+    if args.summary_prompt and args.summary_prompt_file:
+        parser.error("use only one of --compaction-prompt and --compaction-prompt-file")
+    if args.summary_prompt_file:
+        try:
+            summary_prompt = args.summary_prompt_file.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            parser.error(f"could not read compaction prompt file: {exc}")
+    else:
+        summary_prompt = args.summary_prompt or default_summary_prompt()
+    if not summary_prompt:
+        parser.error("compaction prompt must not be empty")
     codex_args = args.codex_args[1:] if args.codex_args[:1] == ["--"] else args.codex_args
     if not args.sessions_dir.exists():
         parser.error(f"sessions directory not found: {args.sessions_dir}")
@@ -362,7 +378,7 @@ def main() -> int:
         workflow_tokens += watch.tokens
         bundle = write_bundle(args.output_dir, watch, reason, watch.tokens)
         try:
-            handoff = run_summary(bundle, args.summary_model, args.summary_effort, args.summary_prompt, cwd)
+            handoff = run_summary(bundle, args.summary_model, args.summary_effort, summary_prompt, cwd)
         except subprocess.CalledProcessError as exc:
             print(f"[bound] handoff failed ({exc.returncode}); bundle retained at {bundle}", file=sys.stderr)
             return exc.returncode

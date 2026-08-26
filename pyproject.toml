@@ -14,7 +14,7 @@ bound-codex-tokens = "bound_codex_tokens:main"
 
 [tool.setuptools]
 py-modules = ["bound_codex_tokens"]
-packages = ["bound_codex_tokens_hooks"]
+packages = ["bound_codex_tokens_assets", "bound_codex_tokens_hooks"]
 
 [tool.setuptools.package-data]
-bound_codex_tokens_hooks = ["*.toml"]
+bound_codex_tokens_assets = ["*.md"]

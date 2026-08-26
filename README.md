@@ -15,7 +15,7 @@ workflow and its delegated work.
 2. **Configurable handoffs.** The handoff uses Luna by default, but its model,
    reasoning effort, and prompt are independent of the interactive TUI. The
    prompt is a top-level option so the continuation format is predictable.
-3. **Guarded v2 delegation.** `--v2-spawn-policy` turns on
+3. **Guarded v2 delegation.** `--no-fork` turns on
    `--enable multi_agent_v2` and adds a temporary per-launch hook. It requires
    `fork_turns: none`, blocks Sol by default, can allow a finite number of Sol
    children, and can restrict children to an explicit model list.
@@ -51,13 +51,17 @@ Customize the bounded handoff (also called a compaction here) independently:
 ```bash
 bound-codex-tokens --total 10M --compactions 2 \
   --compaction-model gpt-5.6-terra --compaction-effort high \
-  --compaction-prompt 'List completed work, tests, blockers, and the next exact action.' \
+  --compaction-prompt-file ./my-handoff-prompt.md \
   -- --yolo
 ```
 
-The wrapper does not use a copied native Codex compaction prompt. Compaction
-output is intentionally opaque in the upstream API, so this tool uses an
-explicit prompt and only supplies selected user/assistant messages plus a
+The default prompt is the versioned
+[`compaction.md`](bound_codex_tokens_assets/compaction.md) shipped with the
+release; the current upstream copy is also available at
+`https://raw.githubusercontent.com/garylvov/bound-codex-tokens/main/bound_codex_tokens_assets/compaction.md`.
+Use `--compaction-prompt-file` to pin a project-specific prompt. The wrapper
+does not use a copied native Codex compaction prompt: native compaction output
+is opaque, so this tool supplies only selected user/assistant messages plus a
 small manifest to the handoff model.
 
 Enable guarded multi-agent v2, permit only Terra or Luna children, and permit
@@ -65,12 +69,13 @@ no Sol children:
 
 ```bash
 bound-codex-tokens --total 10M --compactions 2 \
-  --v2-spawn-policy --max-sol-subagents 0 \
+  --no-fork --max-sol-subagents 0 \
   --allowed-subagent-models gpt-5.6-terra gpt-5.6-luna \
-  -- --enable multi_agent_v2 --disable auto_review --yolo -m gpt-5.6-terra
+  -- --enable multi_agent_v2 --disable auto_review --yolo -m gpt-5.6-terra \
+  -c 'model_reasoning_effort="medium"'
 ```
 
-`--v2-spawn-policy` enables `multi_agent_v2` when it is absent and is
+`--no-fork` enables `multi_agent_v2` when it is absent and is
 idempotent when the normal Codex flag `--enable multi_agent_v2` is already
 present. `fork_turns: none` means a child starts without a copy of the parent
 conversation history. It prevents a large main context from being charged again
