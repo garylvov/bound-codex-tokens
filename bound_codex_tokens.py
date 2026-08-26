@@ -312,6 +312,11 @@ def main() -> int:
         parser.error("--compactions must be zero or greater")
     if args.max_sol_subagents < 0:
         parser.error("--max-sol-subagents must be zero or greater")
+    if args.segment and args.segment * (args.compactions + 1) > args.total:
+        parser.error(
+            "--segment × (initial TUI + --compactions) must not exceed --total; "
+            "lower --segment, lower --compactions, or raise --total"
+        )
     if args.summary_prompt and args.summary_prompt_file:
         parser.error("use only one of --compaction-prompt and --compaction-prompt-file")
     if args.summary_prompt_file:
@@ -330,6 +335,7 @@ def main() -> int:
     # A compaction count is a count of fresh-TUI resumes, so it permits one
     # more TUI segment than its value. Split the total by default so the total
     # budget remains useful rather than silently becoming an unreachable cap.
+    # For reference, 90% of Sol's original 1.05M-token context window is 945K.
     segment_limit = args.segment or (args.total + args.compactions) // (args.compactions + 1)
 
     rollovers = 0

@@ -42,6 +42,12 @@ Run the normal TUI with a 10M workflow cap and two automatic rollovers (`K`,
 bound-codex-tokens --total 10M --compactions 2 -- --yolo -m gpt-5.6-terra
 ```
 
+```bash
+# Optional frequent-handoff guard: 945K is 90% of Sol's 1.05M context window.
+# This must fit every permitted segment: --segment × (1 + --compactions) <= --total.
+bound-codex-tokens --total 10M --segment 945K --compactions 2 -- --yolo
+```
+
 `--yolo` is passed straight through to Codex and gives it broad authority to
 act without asking. Use it only in a workspace and environment you are willing
 to let the unattended TUI change.
