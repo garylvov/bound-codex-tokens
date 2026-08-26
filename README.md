@@ -6,12 +6,12 @@ workflow and its delegated work.
 
 ## The three controls
 
-1. **Separate root and child budgets.** All four controls are required:
+1. **Separate root and child budgets.** All five controls are required:
    `--total-tokens` is the hard combined cap; `--root-compact-every` triggers
-   a root-TUI handoff only from root usage; `--subagent-total-tokens` limits all
-   children together and stops the workflow rather than compacting the root;
-   `--max-compacts-num` is the number of allowed root handoff-and-restart
-   cycles.
+   a root-TUI handoff only from root usage; `--subagent-compact-every` triggers
+   that same handoff when children in the active segment hit their aggregate
+   budget; `--subagent-total-tokens` limits all children across the workflow;
+   `--max-compacts-num` is the number of allowed handoff-and-restart cycles.
 2. **Configurable handoffs.** The handoff uses Luna by default, but its model,
    reasoning effort, and prompt are independent of the interactive TUI. The
    prompt is a top-level versioned Markdown file so the continuation format is
@@ -40,16 +40,16 @@ Run the normal TUI with explicit limits. `K`, `M`, and `B` are accepted:
 
 ```bash
 bound-codex-tokens --total-tokens 10M --root-compact-every 800K \
-  --subagent-total-tokens 2M --max-compacts-num 2 \
+  --subagent-compact-every 500K --subagent-total-tokens 2M --max-compacts-num 2 \
   -- --yolo -m gpt-5.6-terra
 ```
 
 ```bash
 # Exactly two root compacts means: initial TUI → handoff/restart → handoff/restart → final handoff.
-# 245K applies only to root usage; children have their own 2M aggregate budget.
+# 245K applies only to root usage; children compact at 500K per segment and 2M total.
 # It is also 90% of Codex Sol's 272K default context window.
 bound-codex-tokens --total-tokens 10M --root-compact-every 245K \
-  --subagent-total-tokens 2M --max-compacts-num 2 -- --yolo
+  --subagent-compact-every 500K --subagent-total-tokens 2M --max-compacts-num 2 -- --yolo
 ```
 
 `--yolo` is passed straight through to Codex and gives it broad authority to
@@ -60,7 +60,7 @@ Customize the bounded handoff (also called a compaction here) independently:
 
 ```bash
 bound-codex-tokens --total-tokens 10M --root-compact-every 800K \
-  --subagent-total-tokens 2M --max-compacts-num 2 \
+  --subagent-compact-every 500K --subagent-total-tokens 2M --max-compacts-num 2 \
   --compaction-model gpt-5.6-terra --compaction-effort high \
   --compaction-prompt-file ./my-handoff-prompt.md \
   -- --yolo
@@ -84,7 +84,7 @@ no Sol children:
 
 ```bash
 bound-codex-tokens --total-tokens 10M --root-compact-every 800K \
-  --subagent-total-tokens 2M --max-compacts-num 2 \
+  --subagent-compact-every 500K --subagent-total-tokens 2M --max-compacts-num 2 \
   --no-fork --max-sol-subagents 0 \
   --allowed-subagent-models gpt-5.6-terra gpt-5.6-luna \
   -- --enable multi_agent_v2 --disable auto_review --yolo -m gpt-5.6-terra \
@@ -110,8 +110,9 @@ sessions would evade the wrapper's root-lineage accounting.
 
 * `--total-tokens` sums the root TUI and every discovered child session in its
   lineage, including previous TUI segments. The root compact budget counts only
-  the active root TUI; the subagent budget counts all discovered children. The
-  final handoff is a separate Luna/Terra call and is not part of this total.
+  the active root TUI; the subagent compact budget counts children in the active
+  segment; the subagent total budget counts all discovered children. The final
+  handoff is a separate Luna/Terra call and is not part of this total.
   Under `--no-fork`, nested `codex exec` calls are blocked because they would
   evade this lineage. This is a local guardrail, not a claim about final
   provider billing categories.

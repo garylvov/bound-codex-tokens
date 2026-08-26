@@ -37,7 +37,7 @@ class BudgetFlowTest(unittest.TestCase):
             self.assertIn(marker, selected)
 
     def test_visible_budget_prompt_is_rendered(self) -> None:
-        prompt = app.render_session_prompt(10, 30, 20, 8, 5, 2)
+        prompt = app.render_session_prompt(10, 30, 20, 4, 8, 5, 2)
         self.assertIn("10 reported tokens", prompt)
         self.assertIn("30", prompt)
         self.assertIn("20", prompt)

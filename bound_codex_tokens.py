@@ -27,7 +27,7 @@ def default_summary_prompt() -> str:
 
 
 def render_session_prompt(root_compact_every: int, total_tokens: int, remaining_tokens: int,
-                          subagent_total_tokens: int, subagent_remaining_tokens: int,
+                          subagent_compact_every: int, subagent_total_tokens: int, subagent_remaining_tokens: int,
                           compacts_remaining: int) -> str:
     """Render the versioned, visible budget instruction for one TUI segment."""
     from importlib.resources import files
@@ -37,6 +37,7 @@ def render_session_prompt(root_compact_every: int, total_tokens: int, remaining_
         root_compact_every_tokens=f"{root_compact_every:,}",
         total_tokens=f"{total_tokens:,}",
         remaining_tokens=f"{remaining_tokens:,}",
+        subagent_compact_every_tokens=f"{subagent_compact_every:,}",
         subagent_total_tokens=f"{subagent_total_tokens:,}",
         subagent_remaining_tokens=f"{subagent_remaining_tokens:,}",
         compacts_remaining=compacts_remaining,
@@ -303,7 +304,7 @@ def self_test() -> int:
     assert v2_already_enabled(["--enable", "multi_agent_v2"])
     assert v2_already_enabled(["--enable=multi_agent_v2"])
     assert not v2_already_enabled(["--enable", "multi_agent"])
-    assert "10 reported tokens" in render_session_prompt(10, 100, 100, 20, 20, 2)
+    assert "10 reported tokens" in render_session_prompt(10, 100, 100, 8, 20, 20, 2)
     print("self-test passed: limits, budget prompt, flag preservation, and idempotent v2 activation")
     return 0
 
@@ -315,6 +316,8 @@ def main() -> int:
     parser.add_argument("--root-compact-every", "--compact-every", "--rollover-every", "--segment",
                         dest="root_compact_every", type=token_limit,
                         help="root-TUI tokens before one handoff and fresh TUI; e.g. 245K")
+    parser.add_argument("--subagent-compact-every", type=nonnegative_token_limit,
+                        help="aggregate child tokens in one segment before one handoff and fresh TUI")
     parser.add_argument("--subagent-total-tokens", type=nonnegative_token_limit,
                         help="aggregate child-lineage token cap; 0 permits no child usage")
     parser.add_argument("--max-compacts-num", "--max-rollovers", "--compactions", dest="max_rollovers", type=int,
@@ -350,6 +353,7 @@ def main() -> int:
     missing = [name for name, value in (
         ("--total-tokens", args.total),
         ("--root-compact-every", args.root_compact_every),
+        ("--subagent-compact-every", args.subagent_compact_every),
         ("--subagent-total-tokens", args.subagent_total_tokens),
         ("--max-compacts-num", args.max_rollovers),
     ) if value is None]
@@ -359,10 +363,12 @@ def main() -> int:
         parser.error("--max-compacts-num must be zero or greater")
     if args.max_sol_subagents < 0:
         parser.error("--max-sol-subagents must be zero or greater")
-    if args.root_compact_every * (args.max_rollovers + 1) + args.subagent_total_tokens > args.total:
+    segment_count = args.max_rollovers + 1
+    possible_subagent_tokens = min(args.subagent_total_tokens, args.subagent_compact_every * segment_count)
+    if args.root_compact_every * segment_count + possible_subagent_tokens > args.total:
         parser.error(
-            "--root-compact-every × (initial TUI + --max-compacts-num), plus --subagent-total-tokens, "
-            "must not exceed --total-tokens"
+            "root compact budget plus possible subagent budget must not exceed --total-tokens; "
+            "lower a compact budget, lower --max-compacts-num, or raise --total-tokens"
         )
     if args.summary_prompt and args.summary_prompt_file:
         parser.error("use only one of --compaction-prompt and --compaction-prompt-file")
@@ -402,6 +408,7 @@ def main() -> int:
             args.root_compact_every,
             args.total,
             max(0, args.total - workflow_tokens),
+            args.subagent_compact_every,
             args.subagent_total_tokens,
             max(0, args.subagent_total_tokens - workflow_subagent_tokens),
             max_rollovers - rollovers,
@@ -413,7 +420,9 @@ def main() -> int:
         launch_args = without_initial_prompt(codex_args) + [segment_prompt] + policy_args
         print(
             f"[bound] starting TUI segment {rollovers + 1}; "
-            f"root compact every {args.root_compact_every:,}, subagent cap {args.subagent_total_tokens:,}, "
+            f"root compact every {args.root_compact_every:,}, "
+            f"subagent compact every {args.subagent_compact_every:,}, "
+            f"subagent total cap {args.subagent_total_tokens:,}, "
             f"max compacts {max_rollovers}, total cap {args.total:,} reported tokens",
             flush=True,
         )
@@ -441,6 +450,14 @@ def main() -> int:
                 )
             elif watch.root_id and watch.root_tokens >= args.root_compact_every:
                 reason = f"root compact cap reached: {watch.root_tokens:,} >= {args.root_compact_every:,}"
+            elif watch.root_id and (
+                (args.subagent_compact_every == 0 and watch.subagent_tokens > 0)
+                or (args.subagent_compact_every > 0 and watch.subagent_tokens >= args.subagent_compact_every)
+            ):
+                reason = (
+                    f"subagent compact cap reached: {watch.subagent_tokens:,} "
+                    f">= {args.subagent_compact_every:,}"
+                )
             if reason:
                 print(f"[bound] {reason}; stopping TUI", flush=True)
                 terminate(process)
