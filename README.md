@@ -12,6 +12,16 @@ workflow and its delegated work.
    that same handoff when children in the active segment hit their aggregate
    budget; `--max-compacts-num` is the number of allowed handoff-and-restart
    cycles.
+
+The compact count permits one more TUI segment than its value. The effective
+ceiling is therefore:
+
+```text
+min(total-tokens, (root-compact-every + subagent-compact-every) × (1 + max-compacts-num))
+```
+
+For example, root `800K`, subagents `1M`, and two compacts permit three
+segments and an effective ceiling of `5.4M`; `10M` remains the global hard cap.
 2. **Configurable handoffs.** The handoff uses Luna by default, but its model,
    reasoning effort, and prompt are independent of the interactive TUI. The
    prompt is a top-level versioned Markdown file so the continuation format is

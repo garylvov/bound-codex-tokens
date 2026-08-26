@@ -1,7 +1,8 @@
 The root TUI has {root_compact_every_tokens} reported tokens before this TUI
 segment is automatically summarized into a handoff. The supervised workflow has
-a total reported-token limit of {total_tokens}; approximately {remaining_tokens}
-remain. Subagents in this segment trigger a handoff after
+a global reported-token limit of {total_tokens}; this configuration permits at
+most {effective_cap_tokens} before its compact-count limit. Approximately
+{remaining_tokens} remain under the global limit. Subagents in this segment trigger a handoff after
 {subagent_compact_every_tokens} aggregate reported tokens. There are
 {compacts_remaining} automatic compacts remaining after this segment.
 

@@ -26,7 +26,8 @@ def default_summary_prompt() -> str:
     return files("bound_codex_tokens_assets").joinpath("compaction.md").read_text(encoding="utf-8").strip()
 
 
-def render_session_prompt(root_compact_every: int, total_tokens: int, remaining_tokens: int,
+def render_session_prompt(root_compact_every: int, total_tokens: int, effective_cap_tokens: int,
+                          remaining_tokens: int,
                           subagent_compact_every: int,
                           compacts_remaining: int) -> str:
     """Render the versioned, visible budget instruction for one TUI segment."""
@@ -36,6 +37,7 @@ def render_session_prompt(root_compact_every: int, total_tokens: int, remaining_
     return template.format(
         root_compact_every_tokens=f"{root_compact_every:,}",
         total_tokens=f"{total_tokens:,}",
+        effective_cap_tokens=f"{effective_cap_tokens:,}",
         remaining_tokens=f"{remaining_tokens:,}",
         subagent_compact_every_tokens=f"{subagent_compact_every:,}",
         compacts_remaining=compacts_remaining,
@@ -302,7 +304,7 @@ def self_test() -> int:
     assert v2_already_enabled(["--enable", "multi_agent_v2"])
     assert v2_already_enabled(["--enable=multi_agent_v2"])
     assert not v2_already_enabled(["--enable", "multi_agent"])
-    assert "10 reported tokens" in render_session_prompt(10, 100, 100, 8, 2)
+    assert "10 reported tokens" in render_session_prompt(10, 100, 54, 100, 8, 2)
     print("self-test passed: limits, budget prompt, flag preservation, and idempotent v2 activation")
     return 0
 
@@ -382,6 +384,7 @@ def main() -> int:
     # A compact is a handoff plus a fresh-TUI resume, so it permits one more
     # TUI segment than its value. Every budget control is explicit at the CLI.
     max_rollovers = args.max_rollovers
+    effective_cap = min(args.total, (args.root_compact_every + args.subagent_compact_every) * segment_count)
 
     rollovers = 0
     workflow_tokens = 0
@@ -400,6 +403,7 @@ def main() -> int:
         segment_prompt = render_session_prompt(
             args.root_compact_every,
             args.total,
+            effective_cap,
             max(0, args.total - workflow_tokens),
             args.subagent_compact_every,
             max_rollovers - rollovers,
@@ -413,7 +417,8 @@ def main() -> int:
             f"[bound] starting TUI segment {rollovers + 1}; "
             f"root compact every {args.root_compact_every:,}, "
             f"subagent compact every {args.subagent_compact_every:,}, "
-            f"max compacts {max_rollovers}, total cap {args.total:,} reported tokens",
+            f"max compacts {max_rollovers}, effective cap {effective_cap:,} "
+            f"(global total {args.total:,}) reported tokens",
             flush=True,
         )
         process = subprocess.Popen(["codex", *launch_args], start_new_session=True)
