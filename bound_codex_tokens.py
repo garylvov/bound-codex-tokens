@@ -291,9 +291,9 @@ def self_test() -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--total-tokens", "--total", "--session", dest="total", type=token_limit,
-                        help="hard reported-token cap across all TUI segments; e.g. 10M")
+                        help="hard root-plus-subagent-lineage token cap across all TUI segments; e.g. 10M")
     parser.add_argument("--compact-every", "--rollover-every", "--segment", dest="rollover_every", type=token_limit,
-                        help="reported tokens before one handoff and fresh TUI; e.g. 245K")
+                        help="root-plus-subagent-lineage tokens before one handoff and fresh TUI; e.g. 245K")
     parser.add_argument("--max-compacts-num", "--max-rollovers", "--compactions", dest="max_rollovers", type=int,
                         help="maximum automatic handoff-and-fresh-TUI cycles")
     parser.add_argument("--sessions-dir", type=Path, default=default_sessions_dir())
@@ -387,7 +387,7 @@ def main() -> int:
         print(
             f"[bound] starting TUI segment {rollovers + 1}; "
             f"compact every {args.rollover_every:,}, max compacts {max_rollovers}, "
-            f"total cap {args.total:,} reported tokens",
+            f"total cap {args.total:,} root-plus-subagent-lineage reported tokens",
             flush=True,
         )
         process = subprocess.Popen(["codex", *launch_args], start_new_session=True)

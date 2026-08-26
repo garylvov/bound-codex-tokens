@@ -7,9 +7,10 @@ workflow and its delegated work.
 ## The three controls
 
 1. **Explicit bounded compacts.** All three controls are required:
-   `--total-tokens` is the hard cap across all TUI segments;
-   `--compact-every` is the reported-token point at which the wrapper writes a
-   handoff and opens a fresh TUI; and `--max-compacts-num` is exactly the
+   `--total-tokens` is the hard cap across every root-plus-subagent lineage and
+   TUI segment; `--compact-every` is the summed root-plus-subagent lineage
+   token point at which the wrapper writes a handoff and opens a fresh TUI; and
+   `--max-compacts-num` is exactly the
    number of those automatic handoff-and-restart cycles permitted. At either
    limit, it writes one final handoff and stops.
 2. **Configurable handoffs.** The handoff uses Luna by default, but its model,
@@ -45,7 +46,8 @@ bound-codex-tokens --total-tokens 10M --compact-every 800K --max-compacts-num 2 
 
 ```bash
 # Exactly two compacts means: initial TUI → handoff/restart → handoff/restart → final handoff.
-# 245K is 90% of Codex Sol's 272K default context window.
+# 245K is the combined root + discovered-subagent lineage budget, not 245K per agent.
+# It is also 90% of Codex Sol's 272K default context window.
 bound-codex-tokens --total-tokens 10M --compact-every 245K --max-compacts-num 2 -- --yolo
 ```
 
@@ -103,10 +105,11 @@ sessions would evade the wrapper's root-lineage accounting.
 
 ## Notes
 
-* `--total` counts reported tokens from every supervised TUI segment, including
-  those before a rollover. The final handoff is a separate Luna/Terra call and
-  is not part of this total. This is a local guardrail, not a claim about final
-  provider billing categories.
+* Both token limits sum the root TUI and every discovered child session in its
+  lineage, including previous TUI segments. The final handoff is a separate
+  Luna/Terra call and is not part of this total. Under `--no-fork`, nested
+  `codex exec` calls are blocked because they would evade this lineage. This is
+  a local guardrail, not a claim about final provider billing categories.
 * The wrapper uses the regular Codex TUI, not a replacement client. It does not
   change `~/.codex/config.toml`.
 * Run the no-cost checks with `bound-codex-tokens --self-test`.
