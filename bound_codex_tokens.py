@@ -258,7 +258,10 @@ def self_test() -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--session", type=token_limit, default=10_000_000, help="reported-token cap; e.g. 10M")
+    parser.add_argument("--total", "--session", dest="total", type=token_limit, default=10_000_000,
+                        help="reported-token cap across all TUI segments; e.g. 10M")
+    parser.add_argument("--segment", type=token_limit, default=1_000_000,
+                        help="reported-token cap before a handoff and fresh TUI; default: 1M")
     parser.add_argument("--compactions", type=int, default=2, help="maximum automatic fresh-TUI resumes")
     parser.add_argument("--sessions-dir", type=Path, default=default_sessions_dir())
     parser.add_argument("--output-dir", type=Path, default=Path.cwd() / ".bound-codex-tokens")
@@ -294,6 +297,7 @@ def main() -> int:
         parser.error(f"sessions directory not found: {args.sessions_dir}")
 
     rollovers = 0
+    workflow_tokens = 0
     first_launch = True
     cwd = Path.cwd()
     state_file = args.output_dir / f"v2-spawn-policy-{os.getpid()}.json"
@@ -304,7 +308,11 @@ def main() -> int:
         launch_args = (codex_args if first_launch else without_initial_prompt(codex_args) + [
             f"Read the protected handoff at {handoff}; continue from it. Do not use native resume."
         ]) + policy_args
-        print(f"[bound] starting TUI segment {rollovers + 1}; cap {args.session:,} reported tokens", flush=True)
+        print(
+            f"[bound] starting TUI segment {rollovers + 1}; "
+            f"segment cap {args.segment:,}, total cap {args.total:,} reported tokens",
+            flush=True,
+        )
         process = subprocess.Popen(["codex", *launch_args], start_new_session=True)
         watch = SessionWatch(args.sessions_dir, baseline, args.deny_sol_subagents, args.require_fork_none)
         reason: str | None = None
@@ -313,21 +321,27 @@ def main() -> int:
             watch.poll()
             if watch.violation:
                 reason = f"policy violation: {watch.violation}"
-            elif watch.root_id and watch.tokens >= args.session:
-                reason = f"session cap reached: {watch.tokens:,} >= {args.session:,}"
+            elif watch.root_id and workflow_tokens + watch.tokens >= args.total:
+                reason = (
+                    f"workflow total cap reached: {workflow_tokens + watch.tokens:,} "
+                    f">= {args.total:,}"
+                )
+            elif watch.root_id and watch.tokens >= args.segment:
+                reason = f"segment cap reached: {watch.tokens:,} >= {args.segment:,}"
             if reason:
                 print(f"[bound] {reason}; stopping TUI", flush=True)
                 terminate(process)
                 break
         if reason is None:
             return process.wait()
+        workflow_tokens += watch.tokens
         bundle = write_bundle(args.output_dir, watch, reason, watch.tokens)
         try:
             handoff = run_summary(bundle, args.summary_model, args.summary_effort, args.summary_prompt, cwd)
         except subprocess.CalledProcessError as exc:
             print(f"[bound] handoff failed ({exc.returncode}); bundle retained at {bundle}", file=sys.stderr)
             return exc.returncode
-        if rollovers >= args.compactions:
+        if "workflow total cap reached" in reason or rollovers >= args.compactions:
             print(
                 f"[bound] automatic resume limit reached; final handoff: {handoff}\n"
                 "[bound] No new TUI was started. Resume manually from this handoff when ready.",
