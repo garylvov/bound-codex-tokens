@@ -26,6 +26,20 @@ def default_summary_prompt() -> str:
     return files("bound_codex_tokens_assets").joinpath("compaction.md").read_text(encoding="utf-8").strip()
 
 
+def render_session_prompt(compact_every: int, total_tokens: int, remaining_tokens: int,
+                          compacts_remaining: int) -> str:
+    """Render the versioned, visible budget instruction for one TUI segment."""
+    from importlib.resources import files
+
+    template = files("bound_codex_tokens_assets").joinpath("session.md").read_text(encoding="utf-8")
+    return template.format(
+        compact_every_tokens=f"{compact_every:,}",
+        total_tokens=f"{total_tokens:,}",
+        remaining_tokens=f"{remaining_tokens:,}",
+        compacts_remaining=compacts_remaining,
+    ).strip()
+
+
 def token_limit(value: str) -> int:
     match = re.fullmatch(r"([0-9][0-9_]*(?:\.[0-9]+)?)([KkMmBb]?)", value.strip())
     if not match:
@@ -269,7 +283,8 @@ def self_test() -> int:
     assert v2_already_enabled(["--enable", "multi_agent_v2"])
     assert v2_already_enabled(["--enable=multi_agent_v2"])
     assert not v2_already_enabled(["--enable", "multi_agent"])
-    print("self-test passed: limits, flag preservation, and idempotent v2 activation")
+    assert "10 reported tokens" in render_session_prompt(10, 100, 100, 2)
+    print("self-test passed: limits, budget prompt, flag preservation, and idempotent v2 activation")
     return 0
 
 
@@ -358,9 +373,17 @@ def main() -> int:
     )
     while True:
         baseline = discover_logs(args.sessions_dir)
-        launch_args = (codex_args if first_launch else without_initial_prompt(codex_args) + [
-            f"Read the protected handoff at {handoff}; continue from it. Do not use native resume."
-        ]) + policy_args
+        segment_prompt = render_session_prompt(
+            args.rollover_every,
+            args.total,
+            max(0, args.total - workflow_tokens),
+            max_rollovers - rollovers,
+        )
+        if not first_launch:
+            segment_prompt += (
+                f"\n\nRead the protected handoff at {handoff}; continue from it. Do not use native resume."
+            )
+        launch_args = without_initial_prompt(codex_args) + [segment_prompt] + policy_args
         print(
             f"[bound] starting TUI segment {rollovers + 1}; "
             f"compact every {args.rollover_every:,}, max compacts {max_rollovers}, "

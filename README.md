@@ -14,7 +14,8 @@ workflow and its delegated work.
    limit, it writes one final handoff and stops.
 2. **Configurable handoffs.** The handoff uses Luna by default, but its model,
    reasoning effort, and prompt are independent of the interactive TUI. The
-   prompt is a top-level option so the continuation format is predictable.
+   prompt is a top-level versioned Markdown file so the continuation format is
+   predictable. Every TUI segment also receives a visible token-budget prompt.
 3. **Guarded v2 delegation.** `--no-fork` turns on
    `--enable multi_agent_v2` and adds a temporary per-launch hook. It requires
    `fork_turns: none`, blocks Sol by default, can allow a finite number of Sol
@@ -69,6 +70,10 @@ Use `--compaction-prompt-file` to pin a project-specific prompt. The wrapper
 does not use a copied native Codex compaction prompt: native compaction output
 is opaque, so this tool supplies only selected user/assistant messages plus a
 small manifest to the handoff model.
+
+The TUI’s budget instruction is also a top-level Markdown asset:
+[`session.md`](bound_codex_tokens_assets/session.md). It tells Codex the
+per-segment budget, remaining total budget, and remaining automatic compacts.
 
 Enable guarded multi-agent v2, permit only Terra or Luna children, and permit
 no Sol children:
